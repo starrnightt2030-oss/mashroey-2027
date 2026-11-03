@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مشروع التخرج</title>
+<meta name="description" content="مكتبتك الدراسية — اقرأ ملفاتك، علّم عليها، واكتب ملاحظاتك.">
+<meta name="theme-color" content="#F5F3EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#11161E" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="مشروع التخرج">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/app.css">
+<script>
+  try {
+    var t = localStorage.getItem('theme') || 'auto';
+    if (t !== 'auto') document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+</head>
+<body>
+  <div id="splash" class="splash" aria-hidden="true">
+    <img src="icons/icon-192.png" alt="" width="88" height="88">
+    <div class="splash-name">مشروع التخرج</div>
+  </div>
+  <main id="view" class="view"></main>
+  <nav id="tabbar" class="tabbar" aria-label="التنقل الرئيسي"></nav>
+  <div id="layer"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

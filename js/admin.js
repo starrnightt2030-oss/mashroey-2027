@@ -300,6 +300,11 @@ export async function mountAdmin(view, { goBack }) {
       </label>
       <div id="aPending"></div>
       <div id="aPublished"></div>
+      <div class="glabel">الإشعارات الفورية</div>
+      <div class="group">
+        <button class="row" id="aPush"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إعداد OneSignal</b><small id="aPushSt">بيتأكد…</small></span><span class="chev">${icon('chev', 18)}</span></button>
+        <a class="row" id="aPushManual" target="_blank" rel="noopener"><span class="ri">${icon('share', 19)}</span><span class="rt"><b>ابعت إشعار يدوي للطلاب</b><small>من صفحة GitHub Actions ← Run workflow</small></span></a>
+      </div>
       <div class="glabel">الأمان</div>
       <div class="group">
         <button class="row" id="aPass"><span class="ri">${icon('lock', 19)}</span><span class="rt"><b>تغيير كلمة سر المدرس</b><small>بتتزامن مع GitHub وتشتغل على كل الأجهزة</small></span><span class="chev">${icon('chev', 18)}</span></button>
@@ -313,6 +318,9 @@ export async function mountAdmin(view, { goBack }) {
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
     view.querySelector('#aReload').onclick = refresh;
+    view.querySelector('#aPush').onclick = pushSetup;
+    view.querySelector('#aPushManual').href = `https://github.com/${session.repo}/actions/workflows/notify-students.yml`;
+    readPushCfg().then((c) => { const el = view.querySelector('#aPushSt'); if (el) el.textContent = c.onesignalAppId ? 'متفعّل ✓ — App ID متسجل' : 'مش متفعّل — دوس عشان تجهّزه'; });
     view.querySelector('#aPass').onclick = () => renderChangePass(false);
     view.querySelector('#aTok').onclick = () => renderToken(session.pass, false, true);
     view.querySelector('#aLogout').onclick = () => { session = null; toast('اتسجل الخروج'); goBack('/settings'); };
@@ -424,6 +432,48 @@ export async function mountAdmin(view, { goBack }) {
     const nt = box.querySelector('#aNotice'); if (nt) nt.oninput = () => { state.notice = nt.value; };
     const sb = box.querySelector('#aSync');
     if (sb) sb.onclick = () => sync();
+  }
+
+  async function readPushCfg() {
+    try {
+      const j = await gh(`/repos/${session.repo}/contents/config/push.json?ref=${encodeURIComponent(session.branch)}`);
+      return JSON.parse(dec.decode(unb64(j.content.replace(/\s/g, ''))));
+    } catch (e) { return {}; }
+  }
+  async function pushSetup() {
+    const cur = await readPushCfg();
+    sheet({
+      title: 'الإشعارات الفورية (OneSignal)',
+      html: `<form class="stack">
+        <div class="card stack" style="gap:8px">
+          <b>الإعداد مرة واحدة (١٠ دقايق)</b>
+          <div class="hint">
+            ١. اعمل حساب مجاني على <a href="https://onesignal.com" target="_blank" rel="noopener">onesignal.com</a> ← New App ← اسمه «مشروع التخرج» ← اختار <b>Web</b>.<br>
+            ٢. Integration: اختار <b>Custom Code</b> — Site URL: <b dir="ltr">https://${esc(session.repo.split('/')[0])}.github.io</b> ← Save.<br>
+            ٣. من Settings ← <b>Keys &amp; IDs</b>: انسخ <b>App ID</b> والصقه تحت.<br>
+            ٤. من نفس الصفحة اعمل <b>API Key</b> وانسخه، وبعدين في GitHub افتح <a href="https://github.com/${esc(session.repo)}/settings/secrets/actions/new" target="_blank" rel="noopener">صفحة Secrets</a> واعمل Secret اسمه <b dir="ltr">ONESIGNAL_REST_API_KEY</b> وقيمته المفتاح.<br>
+            ٥. خلاص! بعد أي مزامنة، الطلاب اللي فعّلوا الإشعارات هيوصلهم إشعار فوري.
+          </div>
+        </div>
+        <div class="field"><label for="osId">OneSignal App ID</label><input class="input ltr" id="osId" value="${esc(cur.onesignalAppId || '')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+        <button class="btn primary block" id="osSave">${icon('sync', 18)} حفظ ومزامنة مع GitHub</button>
+      </form>`,
+      onMount(el, api) {
+        el.querySelector('form').onsubmit = async (e) => {
+          e.preventDefault();
+          const id = el.querySelector('#osId').value.trim();
+          if (id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return toast('الـ App ID شكله مش مظبوط — انسخه تاني من OneSignal');
+          const b = el.querySelector('#osSave'); b.disabled = true; b.textContent = 'بيحفظ…';
+          try {
+            const { head, baseTree } = await headInfo();
+            await commitTree(head, baseTree, [{ path: 'config/push.json', mode: '100644', type: 'blob', content: JSON.stringify({ onesignalAppId: id }, null, 1) }], 'إعداد الإشعارات الفورية');
+            toast(id ? 'اتفعّلت الإشعارات الفورية — هتشتغل على أجهزة الطلاب خلال دقيقتين' : 'اتلغت الإشعارات الفورية', { ms: 5000 });
+            api.close();
+            const st = view.querySelector('#aPushSt'); if (st) st.textContent = id ? 'متفعّل ✓ — App ID متسجل' : 'مش متفعّل — دوس عشان تجهّزه';
+          } catch (err) { toast('محصلش حفظ: ' + ghError(err)); b.disabled = false; b.innerHTML = icon('sync', 18) + ' حفظ ومزامنة مع GitHub'; }
+        };
+      }
+    });
   }
 
   const isHidden = (f) => (f.id in state.vis ? state.vis[f.id] : !!f.hidden);

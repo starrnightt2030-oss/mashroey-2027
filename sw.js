@@ -1,5 +1,5 @@
 // Service worker — makes the app installable and work offline.
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = 'runtime-v1';
 const ASSETS = [
@@ -34,6 +34,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
   const path = url.pathname;
+  if (path.includes('/push/onesignal/')) return;
 
   // catalog: always try the network first so new files show up
   if (path.endsWith('/files/index.json')) {

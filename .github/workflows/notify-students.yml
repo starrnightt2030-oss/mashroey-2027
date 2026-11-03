@@ -1,0 +1,73 @@
+# Sends an instant push notification to every student (via OneSignal) whenever the
+# teacher publishes an update from the app's teacher panel, or manually from the Actions tab.
+name: إشعار الطلاب بالتحديث
+
+on:
+  push:
+    branches: [main]
+    paths: ['files/index.json']
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'نص الإشعار اللي هيوصل للطلاب'
+        required: true
+        default: 'في محتوى جديد في مشروع التخرج — افتح التطبيق'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Prepare message
+        id: msg
+        env:
+          MANUAL: ${{ github.event.inputs.message }}
+        run: |
+          if [ -n "$MANUAL" ]; then
+            { echo "skip=false"; echo "body<<EOF"; echo "$MANUAL"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git show HEAD~1:files/index.json > /tmp/old.json 2>/dev/null || echo '{"files":[]}' > /tmp/old.json
+          NEW=$(jq -r '.version // 0' files/index.json)
+          OLD=$(jq -r '.version // 0' /tmp/old.json)
+          if [ "$NEW" -le "$OLD" ]; then echo "No new version ($OLD -> $NEW)"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          BODY=$(jq -r --slurpfile old /tmp/old.json '
+            ([$old[0].files[]?.id]) as $o
+            | ([.files[] | select((.hidden | not) and ((.id) as $i | ($o | index($i)) == null)) | .title]) as $n
+            | if ((.notice.version // -1) == .version) and ((.notice.text // "") | length > 0) then .notice.text
+              elif ($n | length) > 0 then "اتضاف \($n | length) ملف جديد: " + ($n[:3] | join("، "))
+              else "المدرس حدّث محتوى المكتبة — افتح التطبيق" end' files/index.json)
+          { echo "skip=false"; echo "body<<EOF"; echo "$BODY"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Send push notification
+        if: steps.msg.outputs.skip == 'false'
+        env:
+          KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+          BODY: ${{ steps.msg.outputs.body }}
+          MANUAL: ${{ github.event.inputs.message }}
+        run: |
+          APP_ID=$(jq -r '.onesignalAppId // empty' config/push.json 2>/dev/null || true)
+          if [ -z "$APP_ID" ] || [ -z "$KEY" ]; then
+            echo "::warning::OneSignal not configured yet (App ID in the teacher panel + ONESIGNAL_REST_API_KEY secret)."
+            exit 0
+          fi
+          # give GitHub Pages time to publish the new files before students tap the notification
+          if [ -z "$MANUAL" ]; then sleep 75; fi
+          URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/"
+          send() {
+            jq -n --arg app "$APP_ID" --arg body "$BODY" --arg url "$URL" --arg seg "$1" '{
+              app_id: $app, target_channel: "push", included_segments: [$seg],
+              headings: { en: "مشروع التخرج — تحديث جديد", ar: "مشروع التخرج — تحديث جديد" },
+              contents: { en: $body, ar: $body }, url: $url }' > /tmp/payload.json
+            curl -sS -X POST https://api.onesignal.com/notifications \
+              -H "Authorization: Key $KEY" -H "Content-Type: application/json" \
+              --data @/tmp/payload.json
+          }
+          RES=$(send "Total Subscriptions"); echo "$RES"
+          if echo "$RES" | jq -e '.errors' >/dev/null 2>&1; then
+            RES=$(send "Subscribed Users"); echo "$RES"
+          fi
+          echo "$RES" | jq -e '.errors' >/dev/null 2>&1 && { echo "::error::OneSignal refused the notification"; exit 1; } || echo "Sent ✓"

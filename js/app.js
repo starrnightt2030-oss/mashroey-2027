@@ -3,7 +3,7 @@ import { icon, esc, ar, mb, ago, toast, sheet, confirmDlg, go, closeAllOverlays,
 import { db, persist, STORES } from './db.js';
 import { loadCatalog, getCatalog, findFile, downloadedIds, getPdfBytes, invalidateDownloads } from './catalog.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 const DEV = { name: 'Mohamed Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
 
 const view = document.getElementById('view');
@@ -311,12 +311,70 @@ function showAppUpdateModal(worker) {
   document.body.appendChild(bd);
   bd.querySelector('#appUpdGo').onclick = (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'بيحدّث…'; worker.postMessage('skip'); };
 }
+// ---------------- instant push (OneSignal) ----------------
+// The teacher sets the OneSignal App ID from the teacher panel (config/push.json). When set, the app
+// subscribes students to real push notifications; a GitHub Action sends one after every teacher sync.
+let osPromise = null;
+async function loadPushConfig() {
+  try {
+    const r = await fetch('config/push.json?t=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) { const j = await r.json(); localStorage.setItem('push-cfg', JSON.stringify(j)); return j; }
+    if (r.status === 404) { localStorage.removeItem('push-cfg'); return {}; }
+  } catch (e) {}
+  try { return JSON.parse(localStorage.getItem('push-cfg') || '{}'); } catch (e) { return {}; }
+}
+function initOneSignal() {
+  if (osPromise) return osPromise;
+  osPromise = (async () => {
+    const cfg = await loadPushConfig();
+    if (!cfg.onesignalAppId || !('serviceWorker' in navigator)) return null;
+    const base = location.pathname.replace(/[^/]*$/, ''); // e.g. /mashroey-2027/
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    const s = document.createElement('script');
+    s.src = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
+    s.defer = true;
+    document.head.appendChild(s);
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve(null), 20000);
+      window.OneSignalDeferred.push(async (OneSignal) => {
+        try {
+          await OneSignal.init({
+            appId: cfg.onesignalAppId,
+            serviceWorkerPath: base.slice(1) + 'push/onesignal/OneSignalSDKWorker.js',
+            serviceWorkerParam: { scope: base + 'push/onesignal/' },
+            notifyButton: { enable: false },
+            allowLocalhostAsSecureOrigin: true
+          });
+          // students who allowed notifications before OneSignal was set up: subscribe them silently
+          if (Notification.permission === 'granted' && !OneSignal.User.PushSubscription.optedIn) {
+            try { await OneSignal.User.PushSubscription.optIn(); } catch (e) {}
+          }
+          clearTimeout(t); resolve(OneSignal);
+        } catch (e) { console.warn('OneSignal', e); clearTimeout(t); resolve(null); }
+      });
+    });
+  })();
+  return osPromise;
+}
+async function pushStatus() {
+  if (!('Notification' in window)) return 'none';
+  if (Notification.permission === 'denied') return 'denied';
+  if (Notification.permission !== 'granted') return 'off';
+  const os = await Promise.race([initOneSignal(), new Promise((r) => setTimeout(() => r(null), 1500))]);
+  return os && os.User.PushSubscription.optedIn ? 'instant' : 'on';
+}
 async function enableNotifications() {
-  if (!('Notification' in window)) { toast(isIOS ? 'على الآيفون: ثبّت التطبيق على الشاشة الرئيسية الأول، وبعدين فعّل الإشعارات' : 'المتصفح ده مش بيدعم الإشعارات'); return false; }
-  const p = await Notification.requestPermission();
-  if (p !== 'granted') { toast('الإشعارات مقفولة — تقدر تفتحها من إعدادات المتصفح للموقع'); return false; }
+  if (!('Notification' in window)) { toast(isIOS ? 'على الآيفون: ثبّت التطبيق على الشاشة الرئيسية الأول، وافتحه من الأيقونة، وبعدين فعّل الإشعارات' : 'المتصفح ده مش بيدعم الإشعارات'); return false; }
+  const os = await initOneSignal();
+  if (os) {
+    try { await os.Notifications.requestPermission(); } catch (e) {}
+    if (Notification.permission === 'granted') { try { await os.User.PushSubscription.optIn(); } catch (e) {} }
+  } else {
+    await Notification.requestPermission();
+  }
+  if (Notification.permission !== 'granted') { toast('الإشعارات مقفولة — تقدر تفتحها من إعدادات المتصفح للموقع'); return false; }
   await registerPeriodic();
-  toast('تمام! هيوصلك إشعار لما المدرس ينزّل جديد');
+  toast('تمام! هيوصلك إشعار أول ما المدرس ينزّل جديد');
   return true;
 }
 async function registerPeriodic() {
@@ -414,6 +472,7 @@ async function viewSettings() {
   const voices = TTS.supported ? await TTS.arabicVoices() : [];
   const curVoice = await TTS.pickVoice();
   const rate = TTS.getRate();
+  const notifState = await pushStatus();
 
   view.innerHTML = `<div class="page stack">
     <div class="titlebar"><h1>الإعدادات</h1></div>
@@ -447,7 +506,7 @@ async function viewSettings() {
     <div class="glabel">التطبيق</div>
     <div class="group">
       ${!isStandalone() ? `<button class="row" id="sInstall"><span class="ri">${icon('install', 19)}</span><span class="rt"><b>ثبّت التطبيق</b><small>على الشاشة الرئيسية زي أي تطبيق</small></span></button>` : ''}
-      <button class="row" id="sNotif"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إشعارات المحتوى الجديد</b><small>${!('Notification' in window) ? 'غير مدعومة هنا' + (isIOS ? ' — ثبّت التطبيق الأول' : '') : Notification.permission === 'granted' ? 'مفعّلة ✓' : Notification.permission === 'denied' ? 'مقفولة من إعدادات المتصفح' : 'دوس عشان تفعّلها'}</small></span></button>
+      <button class="row" id="sNotif"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إشعارات المحتوى الجديد</b><small>${{ none: 'غير مدعومة هنا' + (isIOS ? ' — ثبّت التطبيق الأول' : ''), denied: 'مقفولة من إعدادات المتصفح', off: 'دوس عشان تفعّلها', on: 'مفعّلة ✓', instant: 'مفعّلة ✓ — إشعارات فورية' }[notifState]}</small></span></button>
       <button class="row" id="sUpdate"><span class="ri">${icon('sync', 19)}</span><span class="rt"><b>البحث عن تحديث</b><small>الإصدار ${APP_VERSION}</small></span></button>
       <a class="row" href="#/admin"><span class="ri">${icon('lock', 19)}</span><span class="rt"><b>لوحة المدرس</b><small>رفع الملفات — بكلمة سر</small></span><span class="chev">${icon('chev', 18)}</span></a>
     </div>
@@ -561,6 +620,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   if (!localStorage.getItem('known-ids')) localStorage.setItem('known-ids', JSON.stringify(getCatalog().files.map((f) => f.id)));
   await onRoute();
   startUpdateChecks();
+  setTimeout(initOneSignal, 1200);
   if ('Notification' in window && Notification.permission === 'granted') registerPeriodic();
   setTimeout(hideSplash, 1500);
 })();

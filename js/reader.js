@@ -4,7 +4,7 @@ import { icon, esc, ar, toast, sheet, confirmDlg, formSheet, debounce, uid, hapt
 import { getPdfBytes } from './catalog.js';
 import { db, getMeta, getAnnos, getNotes } from './db.js';
 import { openPdf, pageText } from './pdf.js';
-import { drawAll, hitStroke, simplify, PEN_COLORS, HI_COLORS, NOTE_COLORS, PEN_SIZES, HI_SIZES, BASE } from './ink.js';
+import { drawAll, drawStroke, hitStroke, simplify, PEN_COLORS, HI_COLORS, NOTE_COLORS, PEN_SIZES, HI_SIZES, BASE } from './ink.js';
 import * as TTS from './tts.js';
 
 const PREF_KEY = 'rd-prefs';
@@ -180,7 +180,8 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     const el = st.els[n - 1];
     const ink = el.querySelector('canvas.ink');
     const s = st.sizes[n - 1];
-    const q = Math.min(window.devicePixelRatio || 1, 2);
+    let q = Math.min(window.devicePixelRatio || 1, 3);
+    if (st.W * st.W * s.h / s.w * q * q > 9e6) q = Math.sqrt(9e6 / (st.W * st.W * s.h / s.w));
     const w = Math.round(st.W * q), h = Math.round(st.W * s.h / s.w * q);
     if (ink.width !== w || ink.height !== h) { ink.width = w; ink.height = h; }
     el._iq = q;
@@ -302,15 +303,50 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
   }
 
   // ---------- pointer drawing ----------
+  // The stroke being written is painted on its own low-latency layer (only that stroke, every frame),
+  // with the pen's predicted next points, so writing follows the finger/stylus closely.
   const ptrs = new Map();
   let down = null, live = null, liveN = 0, gesture = null, penDown = false, rafDraw = 0, erased = false;
+  let liveCv = null, liveCtx = null, liveQ = 1, predicted = [];
 
   function ptFor(e, d) {
     return [(e.clientX - d.r.left) / st.W, (e.clientY - d.r.top) / st.W, e.pointerType === 'pen' ? (e.pressure || 0.5) : 0.5];
   }
+  function openLive(n) {
+    const el = st.els[n - 1];
+    const ink = el.querySelector('canvas.ink');
+    liveCv = document.createElement('canvas');
+    liveCv.className = 'live';
+    liveCv.width = ink.width; liveCv.height = ink.height;
+    el.appendChild(liveCv);
+    try { liveCtx = liveCv.getContext('2d', { desynchronized: true }); } catch (e) { liveCtx = null; }
+    if (!liveCtx) liveCtx = liveCv.getContext('2d');
+    liveQ = el._iq || 1;
+  }
+  function closeLive() { if (liveCv) liveCv.remove(); liveCv = liveCtx = null; predicted = []; }
   function scheduleDraw() {
     if (rafDraw) return;
-    rafDraw = requestAnimationFrame(() => { rafDraw = 0; if (live) drawInk(liveN, live); });
+    rafDraw = requestAnimationFrame(() => {
+      rafDraw = 0;
+      if (!live || !liveCtx) return;
+      liveCtx.setTransform(1, 0, 0, 1, 0, 0);
+      liveCtx.clearRect(0, 0, liveCv.width, liveCv.height);
+      liveCtx.setTransform(liveQ, 0, 0, liveQ, 0, 0);
+      const s = predicted.length ? Object.assign({}, live, { p: live.p.concat(predicted) }) : live;
+      drawStroke(liveCtx, s, st.W, true);
+    });
+  }
+  // flatten a highlighter stroke into a neat straight line when it was drawn roughly straight
+  function tidyHighlight(s) {
+    const p = s.p;
+    if (p.length < 3) return;
+    const xs = p.map((q) => q[0]), ys = p.map((q) => q[1]);
+    const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+    if (w > 0.04 && h < Math.max(w * 0.18, s.w * 0.9)) {
+      const y = ys.reduce((a, b) => a + b, 0) / ys.length;
+      const a = p[0][0], b = p[p.length - 1][0];
+      s.p = [[a, y, 0.5], [(a + b) / 2, y, 0.5], [b, y, 0.5]];
+    }
   }
   function eraseAt(n, pt) {
     const data = pageData(n);
@@ -334,7 +370,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     if (ptrs.size === 2) { cancelLive(); startGesture(); return; }
     if (ptrs.size > 2) return;
     const pg = e.target.closest('.pg');
-    if (!pg) return;
+    if (!pg || !pg._rW) return;
     const n = +pg.dataset.n;
     down = { n, r: pg.getBoundingClientRect(), id: e.pointerId };
     const pt = ptFor(e, down);
@@ -342,10 +378,11 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
       const hi = st.tool === 'hi';
       live = { t: st.tool, c: hi ? prefs.hi : prefs.pen, w: (hi ? HI_SIZES[prefs.hiSize] : PEN_SIZES[prefs.penSize]) / BASE, p: [pt] };
       if (e.pointerType === 'pen') live.pr = 1;
-      liveN = n; scheduleDraw();
+      liveN = n; openLive(n); scheduleDraw();
     } else if (st.tool === 'eraser') { erased = false; eraseAt(n, pt); }
   });
-  pagesEl.addEventListener('pointermove', (e) => {
+  const minStep = () => 0.35 / st.W; // ignore sub-pixel jitter
+  function onDrawMove(e) {
     if (!ptrs.has(e.pointerId)) return;
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (gesture) { moveGesture(); return; }
@@ -353,10 +390,18 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     const evs = (e.getCoalescedEvents && e.getCoalescedEvents()) || [];
     for (const ev of evs.length ? evs : [e]) {
       const pt = ptFor(ev, down);
-      if (live) live.p.push(pt); else if (st.tool === 'eraser') eraseAt(down.n, pt);
+      if (live) {
+        const last = live.p[live.p.length - 1];
+        if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) >= minStep()) live.p.push(pt);
+      } else if (st.tool === 'eraser') eraseAt(down.n, pt);
     }
-    if (live) scheduleDraw();
-  });
+    if (live) {
+      const pr = (e.getPredictedEvents && e.getPredictedEvents()) || [];
+      predicted = pr.slice(0, 2).map((ev) => ptFor(ev, down));
+      scheduleDraw();
+    }
+  }
+  pagesEl.addEventListener('pointermove', onDrawMove);
   function endPtr(e, cancel) {
     if (!ptrs.has(e.pointerId)) return;
     ptrs.delete(e.pointerId);
@@ -365,17 +410,19 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     if (!down || e.pointerId !== down.id) return;
     if (live && !cancel) {
       const s = live; live = null;
-      if (s.p.length === 1) s.p.push([s.p[0][0] + 0.0005, s.p[0][1] + 0.0005, s.p[0][2]]);
+      if (s.p.length === 1) s.p.push([s.p[0][0] + 0.0004, s.p[0][1] + 0.0004, s.p[0][2]]);
+      if (s.t === 'hi') tidyHighlight(s);
       s.p = simplify(s.p);
       snapshot(liveN);
       pageData(liveN).s.push(s);
       drawInk(liveN); saveAnnos();
-    } else if (live) { live = null; drawInk(liveN); }
+      closeLive();
+    } else if (live) { live = null; closeLive(); }
     down = null;
   }
   pagesEl.addEventListener('pointerup', (e) => endPtr(e, false));
   pagesEl.addEventListener('pointercancel', (e) => endPtr(e, true));
-  function cancelLive() { if (live) { const n = liveN; live = null; drawInk(n); } down = null; }
+  function cancelLive() { if (live) { live = null; closeLive(); } down = null; }
 
   // ---------- two-finger pan / pinch ----------
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });

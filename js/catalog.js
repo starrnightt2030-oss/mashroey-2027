@@ -17,6 +17,7 @@ export async function loadCatalog({ network = true } = {}) {
       if (r.ok) {
         const j = await r.json();
         if (j && Array.isArray(j.files)) {
+          j.files = j.files.filter((f) => !f.hidden); // hidden by the teacher
           catalog = j;
           try { localStorage.setItem(LS, JSON.stringify(j)); } catch (e) {}
         }

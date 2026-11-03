@@ -3,8 +3,8 @@ import { icon, esc, ar, mb, ago, toast, sheet, confirmDlg, go, closeAllOverlays,
 import { db, persist, STORES } from './db.js';
 import { loadCatalog, getCatalog, findFile, downloadedIds, getPdfBytes, invalidateDownloads } from './catalog.js';
 
-export const APP_VERSION = '1.0.0';
-const DEV = { name: 'Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
+export const APP_VERSION = '1.1.0';
+const DEV = { name: 'Mohamed Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
 
 const view = document.getElementById('view');
 const tabbar = document.getElementById('tabbar');
@@ -86,7 +86,7 @@ const FILTERS = [
   { id: 'all', t: 'كل الملفات' }, { id: 'new', t: 'الجديدة' }, { id: 'dl', t: 'المحمّلة' }, { id: 'done', t: 'خلصتها' }
 ];
 const isNew = (f, m) => !(m && m.opened) && Date.now() - (f.added || 0) < 14 * 864e5;
-const tint = (s) => ['#DCEFEA', '#FBEFD0', '#E3E8F6', '#F6E1E6', '#E7E2F5', '#E0EEDB'][[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % 6];
+const tint = (s) => ['#E2E9FC', '#FDE6E9', '#E6EEF9', '#F1E8FB', '#E3F0FB', '#FBEDEF'][[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % 6];
 
 async function viewLibrary() {
   let filter = sessionStorage.getItem('lib-filter') || 'all';
@@ -99,6 +99,7 @@ async function viewLibrary() {
     </div>
     <label class="search">${icon('search', 18)}<input id="libQ" type="search" placeholder="ابحث في الملفات…" aria-label="بحث"></label>
     <div id="libInstall"></div>
+    <div id="libNotif"></div>
     <div id="libHero"></div>
     <div class="chips" id="libChips" role="tablist"></div>
     <div id="libList"></div>
@@ -123,6 +124,16 @@ async function viewLibrary() {
       </div>` : '';
     const di = $('#doInstall'); if (di) di.onclick = promptInstall;
     const ni = $('#noInstall'); if (ni) ni.onclick = () => { localStorage.setItem('install-dismissed', '1'); draw(); };
+    const nb = $('#libNotif');
+    if (nb) nb.innerHTML = 'Notification' in window && Notification.permission === 'default' && !localStorage.getItem('notif-dismissed') ? `
+      <div class="card" style="display:flex;align-items:center;gap:12px;border-color:var(--red-soft)">
+        <div style="width:42px;height:42px;border-radius:13px;background:var(--red-soft);color:var(--red);display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon('bell', 22)}</div>
+        <div style="flex:1"><b style="font-size:14.5px">فعّل الإشعارات</b><div class="hint">عشان يوصلك إشعار أول ما المدرس ينزّل جديد</div></div>
+        <button class="btn primary sm" id="doNotif">تفعيل</button>
+        <button class="iconbtn" id="noNotif" aria-label="إخفاء" style="width:34px;height:34px">${icon('x', 16)}</button>
+      </div>` : '';
+    const dn = $('#doNotif'); if (dn) dn.onclick = async () => { await enableNotifications(); draw(); };
+    const nn = $('#noNotif'); if (nn) nn.onclick = () => { localStorage.setItem('notif-dismissed', '1'); draw(); };
 
     // continue reading
     const last = files.filter((f) => metas[f.id] && metas[f.id].opened && !metas[f.id].done).sort((a, b) => metas[b.id].opened - metas[a.id].opened)[0];
@@ -206,24 +217,125 @@ async function viewLibrary() {
   refreshCatalog(false).then(async (changed) => { if (changed && currentRoute() === '/') { await loadLocal(); draw(); } });
 }
 
-let lastCatalogStamp = null;
 async function refreshCatalog(manual) {
   const before = JSON.stringify(getCatalog().files.map((f) => f.id + f.title));
   const cat = await loadCatalog();
   const after = JSON.stringify(cat.files.map((f) => f.id + f.title));
-  // tell the student about new files
-  try {
-    const known = JSON.parse(localStorage.getItem('known-ids') || 'null');
-    const ids = cat.files.map((f) => f.id);
-    if (known) {
-      const fresh = ids.filter((id) => !known.includes(id));
-      if (fresh.length) toast(fresh.length === 1 ? 'اتضاف ملف جديد للمكتبة' : `اتضاف ${ar(fresh.length)} ملفات جديدة`);
-    }
-    localStorage.setItem('known-ids', JSON.stringify(ids));
-  } catch (e) {}
+  await checkContentUpdate(cat);
   if (manual) toast(navigator.onLine ? 'المكتبة محدّثة' : 'انت أوفلاين — دي آخر نسخة متحفظة');
-  lastCatalogStamp = after;
   return before !== after;
+}
+
+// ---------------- mandatory content updates ----------------
+// Every teacher sync bumps index.version. When a student's app sees a newer version it shows a
+// blocking "update now" screen that downloads the new files, so every student gets every update.
+let updateOpen = false;
+function setSeen(cat) {
+  const v = cat.version || 0;
+  try {
+    localStorage.setItem('seen-version', String(v));
+    localStorage.setItem('known-ids', JSON.stringify(cat.files.map((f) => f.id)));
+  } catch (e) {}
+  try { caches.open('app-state').then((c) => c.put('seen-version', new Response(String(v)))); } catch (e) {}
+  try { navigator.clearAppBadge && navigator.clearAppBadge(); } catch (e) {}
+}
+async function checkContentUpdate(cat) {
+  const v = cat.version || 0;
+  const seenRaw = localStorage.getItem('seen-version');
+  if (seenRaw === null) { setSeen(cat); return; }
+  if (v <= +seenRaw || updateOpen) return;
+  if (currentRoute().startsWith('/admin')) { setSeen(cat); return; } // the teacher just published it
+  let known = [];
+  try { known = JSON.parse(localStorage.getItem('known-ids') || '[]'); } catch (e) {}
+  const fresh = cat.files.filter((f) => !known.includes(f.id));
+  try { navigator.setAppBadge && navigator.setAppBadge(fresh.length || 1); } catch (e) {}
+  if (document.hidden) notifySystem(cat, fresh);
+  showUpdateModal(cat, fresh);
+}
+async function notifySystem(cat, fresh) {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    const body = (cat.notice && cat.notice.version === cat.version && cat.notice.text) ||
+      (fresh.length ? `اتضاف: ${fresh.slice(0, 3).map((f) => f.title).join('، ')}` : 'المدرس حدّث محتوى المكتبة');
+    reg.showNotification('مشروع التخرج — تحديث جديد', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl', renotify: true });
+  } catch (e) {}
+}
+function showUpdateModal(cat, fresh) {
+  updateOpen = true;
+  const note = cat.notice && cat.notice.version === cat.version ? cat.notice.text : '';
+  const bd = document.createElement('div');
+  bd.className = 'backdrop center upd-modal';
+  bd.innerHTML = `<div class="dialog upd" role="alertdialog" aria-modal="true" aria-labelledby="updT">
+    <div class="upd-ic">${icon('bell', 30)}</div>
+    <h3 id="updT">تحديث جديد من المدرس</h3>
+    ${note ? `<div class="upd-note">${esc(note)}</div>` : ''}
+    ${fresh.length ? `<div class="upd-list">${fresh.slice(0, 5).map((f) => `<div>${icon('file', 16)}<span>${esc(f.title)}</span></div>`).join('')}${fresh.length > 5 ? `<small>و${ar(fresh.length - 5)} ملفات كمان</small>` : ''}</div>`
+      : '<p>المدرس حدّث المكتبة — دوس تحديث عشان يوصلك آخر محتوى.</p>'}
+    <div class="upd-prog hidden"><div class="progress"><i></i></div><small></small></div>
+    <button class="btn primary block" id="updGo">${icon('download', 18)} تحديث الآن</button>
+    <div class="hint" style="text-align:center;margin-top:8px">التحديث إجباري عشان يوصلك كل جديد</div>
+  </div>`;
+  document.body.appendChild(bd);
+  const go = bd.querySelector('#updGo');
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = 'بيحدّث…';
+    const pr = bd.querySelector('.upd-prog'); pr.classList.remove('hidden');
+    const bar = pr.querySelector('i'), lbl = pr.querySelector('small');
+    let fail = 0;
+    for (const [i, f] of fresh.entries()) {
+      try {
+        await getPdfBytes(f, (p) => { bar.style.width = Math.round(((i + p) / fresh.length) * 100) + '%'; lbl.textContent = `بيحمّل ${ar(i + 1)} من ${ar(fresh.length)}`; });
+      } catch (e) { fail++; }
+    }
+    bar.style.width = '100%';
+    setSeen(cat);
+    updateOpen = false;
+    bd.classList.add('closing'); setTimeout(() => bd.remove(), 220);
+    toast(fail ? 'المكتبة اتحدّثت — في ملفات هتتحمّل لما تفتحها' : 'تمام! المكتبة محدّثة ومتاحة بدون نت');
+    const r = currentRoute();
+    if (r === '/' || r === '/settings' || r === '/marks' || r === '/mynotes') onRoute();
+  };
+}
+function showAppUpdateModal(worker) {
+  if (document.querySelector('.app-upd')) return;
+  const bd = document.createElement('div');
+  bd.className = 'backdrop center upd-modal app-upd';
+  bd.innerHTML = `<div class="dialog upd" role="alertdialog" aria-modal="true">
+    <div class="upd-ic">${icon('sync', 30)}</div>
+    <h3>إصدار جديد من التطبيق</h3>
+    <p>في تحسينات جديدة للتطبيق. ملاحظاتك وتعليقاتك محفوظة ومش هتتأثر.</p>
+    <button class="btn primary block" id="appUpdGo">${icon('sync', 18)} تحديث الآن</button>
+  </div>`;
+  document.body.appendChild(bd);
+  bd.querySelector('#appUpdGo').onclick = (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'بيحدّث…'; worker.postMessage('skip'); };
+}
+async function enableNotifications() {
+  if (!('Notification' in window)) { toast(isIOS ? 'على الآيفون: ثبّت التطبيق على الشاشة الرئيسية الأول، وبعدين فعّل الإشعارات' : 'المتصفح ده مش بيدعم الإشعارات'); return false; }
+  const p = await Notification.requestPermission();
+  if (p !== 'granted') { toast('الإشعارات مقفولة — تقدر تفتحها من إعدادات المتصفح للموقع'); return false; }
+  await registerPeriodic();
+  toast('تمام! هيوصلك إشعار لما المدرس ينزّل جديد');
+  return true;
+}
+async function registerPeriodic() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    if (!('periodicSync' in reg)) return;
+    let ok = true;
+    try { ok = (await navigator.permissions.query({ name: 'periodic-background-sync' })).state === 'granted'; } catch (e) {}
+    if (ok) await reg.periodicSync.register('check-updates', { minInterval: 60 * 60 * 1000 });
+  } catch (e) {}
+}
+function startUpdateChecks() {
+  setInterval(() => { if (navigator.onLine) refreshCatalog(false); }, 90000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refreshCatalog(false);
+    navigator.serviceWorker && navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+  });
+  window.addEventListener('online', () => refreshCatalog(false));
 }
 
 async function promptInstall() {
@@ -335,6 +447,7 @@ async function viewSettings() {
     <div class="glabel">التطبيق</div>
     <div class="group">
       ${!isStandalone() ? `<button class="row" id="sInstall"><span class="ri">${icon('install', 19)}</span><span class="rt"><b>ثبّت التطبيق</b><small>على الشاشة الرئيسية زي أي تطبيق</small></span></button>` : ''}
+      <button class="row" id="sNotif"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إشعارات المحتوى الجديد</b><small>${!('Notification' in window) ? 'غير مدعومة هنا' + (isIOS ? ' — ثبّت التطبيق الأول' : '') : Notification.permission === 'granted' ? 'مفعّلة ✓' : Notification.permission === 'denied' ? 'مقفولة من إعدادات المتصفح' : 'دوس عشان تفعّلها'}</small></span></button>
       <button class="row" id="sUpdate"><span class="ri">${icon('sync', 19)}</span><span class="rt"><b>البحث عن تحديث</b><small>الإصدار ${APP_VERSION}</small></span></button>
       <a class="row" href="#/admin"><span class="ri">${icon('lock', 19)}</span><span class="rt"><b>لوحة المدرس</b><small>رفع الملفات — بكلمة سر</small></span><span class="chev">${icon('chev', 18)}</span></a>
     </div>
@@ -406,6 +519,7 @@ async function viewSettings() {
     e.target.value = '';
   };
   const si = $('#sInstall'); if (si) si.onclick = promptInstall;
+  $('#sNotif').onclick = async () => { if (await enableNotifications()) viewSettings(); };
   $('#sUpdate').onclick = async () => {
     const reg = await navigator.serviceWorker?.getRegistration();
     if (reg) { await reg.update(); if (!reg.waiting && !reg.installing) toast('عندك أحدث إصدار'); }
@@ -425,7 +539,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('sw.js');
-      const offer = (w) => toast('في إصدار جديد من التطبيق', { action: 'حدّث', ms: 12000, onAction: () => w.postMessage('skip') });
+      const offer = (w) => showAppUpdateModal(w);
       if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
       reg.addEventListener('updatefound', () => {
         const w = reg.installing;
@@ -446,5 +560,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   if (!getCatalog().files.length) await loadCatalog();
   if (!localStorage.getItem('known-ids')) localStorage.setItem('known-ids', JSON.stringify(getCatalog().files.map((f) => f.id)));
   await onRoute();
+  startUpdateChecks();
+  if ('Notification' in window && Notification.permission === 'granted') registerPeriodic();
   setTimeout(hideSplash, 1500);
 })();

@@ -1,5 +1,5 @@
 // Service worker — makes the app installable and work offline.
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = 'runtime-v1';
 const ASSETS = [
@@ -60,4 +60,34 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   e.respondWith(caches.match(req, { ignoreSearch: false }).then((hit) => hit || fetch(req)));
+});
+
+// ---- content-update notifications (no server needed) ----
+async function checkUpdates() {
+  try {
+    const r = await fetch('files/index.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    const v = j.version || 0;
+    const c = await caches.open('app-state');
+    const seenR = await c.match('seen-version');
+    if (!seenR) return;
+    const seen = +(await seenR.text());
+    const notR = await c.match('notified-version');
+    const notified = notR ? +(await notR.text()) : 0;
+    if (v > seen && v > notified) {
+      const body = (j.notice && j.notice.version === v && j.notice.text) || 'المدرس نزّل محتوى جديد — افتح التطبيق عشان يوصلك.';
+      await self.registration.showNotification('مشروع التخرج — تحديث جديد', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl' });
+      await c.put('notified-version', new Response(String(v)));
+      if (self.navigator.setAppBadge) self.navigator.setAppBadge(1).catch(() => {});
+    }
+  } catch (e) {}
+}
+self.addEventListener('periodicsync', (e) => { if (e.tag === 'check-updates') e.waitUntil(checkUpdates()); });
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ws) => {
+    for (const w of ws) if ('focus' in w) return w.focus();
+    return self.clients.openWindow('./');
+  }));
 });

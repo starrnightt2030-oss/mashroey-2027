@@ -8,7 +8,7 @@ export const HI_COLORS = ['#F6C445', '#7FD8B5', '#F79AC0', '#8EC5FF'];
 export const NOTE_COLORS = [
   { id: 'yellow', hex: '#FFE58A' }, { id: 'blue', hex: '#B8CBF5' }, { id: 'green', hex: '#A9DCC6' }, { id: 'pink', hex: '#F3B6CB' }
 ];
-export const PEN_SIZES = [2, 3.4, 5.5];   // px at base width 360
+export const PEN_SIZES = [2.3, 3.6, 5.8];   // px at base width 360
 export const HI_SIZES = [12, 18, 26];
 export const BASE = 360;
 
@@ -28,9 +28,12 @@ function svgPath(points) {
 export function strokeOutline(s, W, live = false) {
   const pts = s.p.map((p) => [p[0] * W, p[1] * W, p[2] ?? 0.5]);
   const size = s.w * W;
+  // finger: even, ink-like line · stylus: real pressure for natural thick/thin writing
+  const finger = !s.pr;
   const opts = s.t === 'hi'
-    ? { size, thinning: 0, smoothing: 0.6, streamline: 0.5, simulatePressure: false, last: !live, start: { cap: true }, end: { cap: true } }
-    : { size, thinning: 0.6, smoothing: 0.55, streamline: 0.42, simulatePressure: !s.pr, last: !live };
+    ? { size, thinning: 0, smoothing: 0.7, streamline: 0.55, simulatePressure: false, last: !live, start: { cap: true }, end: { cap: true } }
+    : { size, thinning: finger ? 0.28 : 0.62, smoothing: 0.62, streamline: 0.4, simulatePressure: finger,
+        easing: (t) => Math.sin((t * Math.PI) / 2), start: { cap: true, taper: 0 }, end: { cap: true, taper: 0 }, last: !live };
   return getStroke(pts, opts);
 }
 

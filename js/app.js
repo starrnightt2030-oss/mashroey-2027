@@ -3,7 +3,7 @@ import { icon, esc, ar, mb, ago, toast, sheet, confirmDlg, go, closeAllOverlays,
 import { db, persist, STORES } from './db.js';
 import { loadCatalog, getCatalog, findFile, downloadedIds, getPdfBytes, invalidateDownloads } from './catalog.js';
 
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.2.1';
 const DEV = { name: 'Mohamed Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
 
 const view = document.getElementById('view');
@@ -396,6 +396,24 @@ function startUpdateChecks() {
   window.addEventListener('online', () => refreshCatalog(false));
 }
 
+function installHelp() {
+  sheet({
+    title: 'تثبيت التطبيق',
+    html: `<div class="stack">
+      <div class="row" style="padding:0"><span class="ri">${icon('more', 20)}</span><span class="rt"><b>١. من Chrome دوس على ⋮ فوق</b><small>القائمة اللي في الركن</small></span></div>
+      <div class="row" style="padding:0;border:0"><span class="ri">${icon('install', 20)}</span><span class="rt"><b>٢. اختار «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية»</b><small>Install app / Add to Home screen</small></span></div>
+      <div class="card stack" style="gap:6px;border-color:var(--red-soft)">
+        <b>بيقولك «مثبّت بالفعل» وانت مسحته؟</b>
+        <div class="hint">
+          • شيل الأيقونة من الشاشة مش بيمسح التطبيق — امسحه من: <b>الإعدادات ← التطبيقات ← مشروع التخرج ← إلغاء التثبيت</b>.<br>
+          • وبعدين اقفل Chrome خالص وافتحه تاني، وارجع للموقع ودوس «تثبيت».<br>
+          • لو لسه: Chrome ← الإعدادات ← إعدادات المواقع ← كل المواقع ← <b dir="ltr">github.io</b> ← امسح البيانات. (ملاحظاتك هتتمسح، فاعمل نسخة احتياطية الأول من الإعدادات)
+        </div>
+      </div>
+      <button class="btn primary block" data-close>فهمت</button></div>`
+  });
+}
+
 async function promptInstall() {
   if (deferredInstall) {
     deferredInstall.prompt();
@@ -413,7 +431,7 @@ async function promptInstall() {
         <button class="btn primary block" data-close>فهمت</button></div>`
     });
   } else {
-    toast('من قائمة المتصفح اختار «تثبيت التطبيق» أو «إضافة للشاشة الرئيسية»');
+    installHelp();
   }
 }
 
@@ -509,6 +527,7 @@ async function viewSettings() {
       <button class="row" id="sNotif"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إشعارات المحتوى الجديد</b><small>${{ none: 'غير مدعومة هنا' + (isIOS ? ' — ثبّت التطبيق الأول' : ''), denied: 'مقفولة من إعدادات المتصفح', off: 'دوس عشان تفعّلها', on: 'مفعّلة ✓', instant: 'مفعّلة ✓ — إشعارات فورية' }[notifState]}</small></span></button>
       <button class="row" id="sUpdate"><span class="ri">${icon('sync', 19)}</span><span class="rt"><b>البحث عن تحديث</b><small>الإصدار ${APP_VERSION}</small></span></button>
       <a class="row" href="#/admin"><span class="ri">${icon('lock', 19)}</span><span class="rt"><b>لوحة المدرس</b><small>رفع الملفات — بكلمة سر</small></span><span class="chev">${icon('chev', 18)}</span></a>
+      <a class="row" href="#/admin?do=pass"><span class="ri">${icon('key', 19)}</span><span class="rt"><b>تغيير كلمة سر المدرس</b><small>للمدرس فقط — بتتزامن مع GitHub</small></span><span class="chev">${icon('chev', 18)}</span></a>
     </div>
     ${credits()}
   </div>`;

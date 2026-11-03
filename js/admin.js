@@ -150,13 +150,27 @@ export async function mountAdmin(view, { goBack }) {
     </div>`;
     view.querySelector('#aBack').onclick = () => goBack('/settings');
   }
-  const pwField = (id, label, extra = '') => `<div class="field"><label for="${id}">${label}</label><input class="input" id="${id}" type="password" autocomplete="off" ${extra}></div>`;
+  const pwField = (id, label, extra = '', cls = '') => `<div class="field"><label for="${id}">${label}</label><div class="pw"><input class="input ${cls}" id="${id}" type="password" autocomplete="off" ${extra}><button type="button" class="pw-eye" data-eye="${id}" aria-label="إظهار كلمة السر" aria-pressed="false">${icon('eye', 20)}</button></div></div>`;
+  // show / hide password with the eye button
+  if (!view._eyeBound) view._eyeBound = true, view.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-eye]');
+    if (!b) return;
+    const inp = view.querySelector('#' + b.dataset.eye);
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    b.innerHTML = icon(show ? 'eyeoff' : 'eye', 20);
+    b.setAttribute('aria-pressed', String(show));
+    b.setAttribute('aria-label', show ? 'إخفاء كلمة السر' : 'إظهار كلمة السر');
+    inp.focus();
+  });
+  const wantPass = /[?&]do=pass/.test(location.hash);
+  const afterLogin = () => (wantPass ? renderChangePass(false) : renderDash());
 
   // ----- 1) login: the one teacher password -----
   function renderLogin() {
     shell(`
       <div class="lock-ill">${icon('lock', 34)}</div>
-      <div style="text-align:center"><h2 style="font-size:19px">دخول المدرس فقط</h2><div class="hint">لوحة رفع الملفات والتحكم فيها محمية بكلمة سر</div></div>
+      <div style="text-align:center"><h2 style="font-size:19px">${wantPass ? 'تغيير كلمة سر المدرس' : 'دخول المدرس فقط'}</h2><div class="hint">${wantPass ? 'اكتب كلمة السر الحالية الأول' : 'لوحة رفع الملفات والتحكم فيها محمية بكلمة سر'}</div></div>
       <form class="stack" id="loginForm">
         ${pwField('lp', 'كلمة سر المدرس', 'required autofocus autocomplete="current-password"')}
         <button class="btn primary block" id="lBtn">دخول</button>
@@ -182,7 +196,7 @@ export async function mountAdmin(view, { goBack }) {
         if (local) { try { token = await unseal(local, pass); } catch (er) { token = null; } }
         if (token) {
           session = { token, repo: local.repo, branch: local.branch, pass };
-          if (r.isDefault) renderChangePass(true); else renderDash();
+          if (r.isDefault) renderChangePass(true); else afterLogin();
         } else {
           renderToken(pass, r.isDefault);
         }
@@ -210,7 +224,7 @@ export async function mountAdmin(view, { goBack }) {
         </div>
       </div>
       <form class="stack" id="tokForm" autocomplete="off">
-        <div class="field"><label for="sTok">مفتاح GitHub</label><input class="input ltr" id="sTok" type="password" placeholder="github_pat_…" required></div>
+        ${pwField('sTok', 'مفتاح GitHub', 'placeholder="github_pat_…" required', 'ltr')}
         <details><summary class="hint" style="cursor:pointer">إعدادات متقدمة</summary>
           <div class="stack" style="margin-top:10px">
             <div class="field"><label for="sRepo">المستودع</label><input class="input ltr" id="sRepo" value="${esc(local.repo || DEFAULT_REPO)}" required></div>
@@ -233,7 +247,7 @@ export async function mountAdmin(view, { goBack }) {
         await saveLocal(token, pass, repo, branch);
         session = s;
         toast('اتربط الجهاز بـ GitHub');
-        if (isDefault) renderChangePass(true); else renderDash();
+        if (isDefault) renderChangePass(true); else afterLogin();
       } catch (err) {
         toast(ghError(err), { ms: 5000 });
         btn.disabled = false; btn.innerHTML = icon('check', 18) + ' ربط ومتابعة';
@@ -617,7 +631,7 @@ export async function mountAdmin(view, { goBack }) {
     }
   }
 
-  if (session) renderDash();
+  if (session) afterLogin();
   else renderLogin();
 
   return () => { dead = true; };

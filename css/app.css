@@ -371,3 +371,8 @@ h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35}
 .upd-prog .progress{background:var(--line);height:8px}
 .upd-prog .progress i{background:var(--accent)}
 .upd-prog small{color:var(--muted);font-size:12.5px}
+
+.pw{position:relative}
+.pw .input{padding-left:52px}
+.pw-eye{position:absolute;left:4px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.pw-eye[aria-pressed="true"]{color:var(--accent)}

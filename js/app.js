@@ -3,7 +3,7 @@ import { icon, esc, ar, mb, ago, toast, sheet, confirmDlg, go, closeAllOverlays,
 import { db, persist, STORES } from './db.js';
 import { loadCatalog, getCatalog, findFile, downloadedIds, getPdfBytes, invalidateDownloads } from './catalog.js';
 
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.3.0';
 const DEV = { name: 'Mohamed Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
 
 const view = document.getElementById('view');
@@ -23,6 +23,7 @@ export function goBack(fallback = '/') {
 
 const TABS = [
   { r: '/', ic: 'home', t: 'المكتبة' },
+  { r: '/notices', ic: 'megaphone', t: 'التعليمات' },
   { r: '/marks', ic: 'bookmark', t: 'العلامات' },
   { r: '/mynotes', ic: 'note', t: 'ملاحظاتي' },
   { r: '/settings', ic: 'sliders', t: 'الإعدادات' }
@@ -30,7 +31,37 @@ const TABS = [
 function renderTabbar(route) {
   const main = TABS.some((t) => t.r === route);
   tabbar.classList.toggle('away', !main);
-  tabbar.innerHTML = TABS.map((t) => `<a class="tab ${t.r === route ? 'on' : ''}" href="#${t.r}" ${t.r === route ? 'aria-current="page"' : ''}>${icon(t.ic, 22)}<span>${t.t}</span></a>`).join('');
+  const unread = unreadNotices().length;
+  tabbar.innerHTML = TABS.map((t) => `<a class="tab ${t.r === route ? 'on' : ''}" href="#${t.r}" ${t.r === route ? 'aria-current="page"' : ''}>${icon(t.ic, 22)}${t.r === '/notices' && unread ? `<b class="tbadge" aria-label="${ar(unread)} جديد">${ar(unread)}</b>` : ''}<span>${t.t}</span></a>`).join('');
+}
+
+// ---------------- teacher instructions (announcements) ----------------
+const notices = () => [...(getCatalog().announcements || [])].sort((a, b) => b.at - a.at);
+const readNoticeIds = () => { try { return JSON.parse(localStorage.getItem('read-notices') || '[]'); } catch (e) { return []; } };
+const unreadNotices = () => { const r = readNoticeIds(); return notices().filter((n) => !r.includes(n.id)); };
+function markNoticesRead() { try { localStorage.setItem('read-notices', JSON.stringify(notices().map((n) => n.id))); } catch (e) {} }
+const linkify = (t) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const fmtDate = (ts) => new Date(ts).toLocaleString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
+
+async function viewNotices() {
+  await loadCatalog().catch(() => {});
+  const list = notices();
+  const unread = new Set(unreadNotices().map((n) => n.id));
+  view.innerHTML = `<div class="page stack">
+    <div class="titlebar"><h1>التعليمات</h1>${unread.size ? `<span class="pill" style="background:var(--red-soft);color:var(--red-soft-ink);font-weight:600">${ar(unread.size)} جديد</span>` : ''}</div>
+    ${list.length ? list.map((n) => `
+      <article class="notice ${unread.has(n.id) ? 'unread' : ''}">
+        <div class="notice-h">
+          <span class="notice-ic">${icon('megaphone', 20)}</span>
+          <div style="flex:1;min-width:0"><h2>${esc(n.title)}</h2><time>${esc(fmtDate(n.at))}</time></div>
+          ${unread.has(n.id) ? '<span class="badge-new">جديد</span>' : ''}
+        </div>
+        ${n.text ? `<div class="notice-t">${linkify(n.text)}</div>` : ''}
+      </article>`).join('')
+    : `<div class="empty"><div class="ill">${icon('megaphone', 28)}</div><h3>مفيش تعليمات لسه</h3><span>أي تعليمات أو مواعيد من المدرس هتظهر هنا، وهيوصلك إشعار بيها.</span></div>`}
+    ${credits()}
+  </div>`;
+  if (unread.size) setTimeout(() => { markNoticesRead(); if (currentRoute() === '/notices') renderTabbar('/notices'); }, 1200);
 }
 
 async function onRoute() {
@@ -47,6 +78,7 @@ async function onRoute() {
   try {
     if (!parts.length) await viewLibrary();
     else if (parts[0] === 'marks') await viewMarks();
+    else if (parts[0] === 'notices') await viewNotices();
     else if (parts[0] === 'mynotes') await viewNotesHub();
     else if (parts[0] === 'settings') await viewSettings();
     else if (parts[0] === 'admin') { const m = await import('./admin.js'); cleanup = await m.mountAdmin(view, { goBack }); }
@@ -98,6 +130,7 @@ async function viewLibrary() {
       <button class="iconbtn boxed" id="libRefresh" aria-label="تحديث قائمة الملفات">${icon('sync', 20)}</button>
     </div>
     <label class="search">${icon('search', 18)}<input id="libQ" type="search" placeholder="ابحث في الملفات…" aria-label="بحث"></label>
+    <div id="libNotice"></div>
     <div id="libInstall"></div>
     <div id="libNotif"></div>
     <div id="libHero"></div>
@@ -122,6 +155,12 @@ async function viewLibrary() {
         <button class="btn primary sm" id="doInstall">تثبيت</button>
         <button class="iconbtn" id="noInstall" aria-label="إخفاء" style="width:34px;height:34px">${icon('x', 16)}</button>
       </div>` : '';
+    const un = unreadNotices();
+    const nbx = $('#libNotice');
+    if (nbx) nbx.innerHTML = un.length ? `<a class="notice-banner" href="#/notices">
+        <span class="notice-ic">${icon('megaphone', 22)}</span>
+        <span style="flex:1;min-width:0"><b>${un.length === 1 ? 'تعليمات جديدة من المدرس' : ar(un.length) + ' تعليمات جديدة من المدرس'}</b><small>${esc(un[0].title)}</small></span>
+        <span class="pill">اقرأ</span></a>` : '';
     const di = $('#doInstall'); if (di) di.onclick = promptInstall;
     const ni = $('#noInstall'); if (ni) ni.onclick = () => { localStorage.setItem('install-dismissed', '1'); draw(); };
     const nb = $('#libNotif');
@@ -222,6 +261,8 @@ async function refreshCatalog(manual) {
   const cat = await loadCatalog();
   const after = JSON.stringify(cat.files.map((f) => f.id + f.title));
   await checkContentUpdate(cat);
+  const r0 = currentRoute().split('?')[0];
+  if (TABS.some((t) => t.r === r0)) renderTabbar(r0);
   if (manual) toast(navigator.onLine ? 'المكتبة محدّثة' : 'انت أوفلاين — دي آخر نسخة متحفظة');
   return before !== after;
 }
@@ -248,54 +289,67 @@ async function checkContentUpdate(cat) {
   let known = [];
   try { known = JSON.parse(localStorage.getItem('known-ids') || '[]'); } catch (e) {}
   const fresh = cat.files.filter((f) => !known.includes(f.id));
-  try { navigator.setAppBadge && navigator.setAppBadge(fresh.length || 1); } catch (e) {}
-  if (document.hidden) notifySystem(cat, fresh);
-  showUpdateModal(cat, fresh);
+  const news = (cat.announcements || []).filter((a) => (a.version || 0) > +seenRaw);
+  // files the teacher replaced (e.g. repaired text) that this student already has
+  const dl = await downloadedIds();
+  let revs = {};
+  try { revs = JSON.parse(localStorage.getItem('pdf-rev') || '{}'); } catch (e) {}
+  const changed = cat.files.filter((f) => dl.has(f.id) && (f.rev || 0) !== (revs[f.id] || 0) && !fresh.includes(f));
+  try { navigator.setAppBadge && navigator.setAppBadge(fresh.length + news.length || 1); } catch (e) {}
+  if (document.hidden) notifySystem(cat, fresh, news);
+  showUpdateModal(cat, fresh, news, changed);
 }
-async function notifySystem(cat, fresh) {
+async function notifySystem(cat, fresh, news = []) {
   try {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const reg = await navigator.serviceWorker.getRegistration();
     if (!reg) return;
+    if (news.length) {
+      reg.showNotification('مشروع التخرج — تعليمات جديدة', { body: news[0].title + (news[0].text ? ' — ' + news[0].text.slice(0, 120) : ''), icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl', renotify: true });
+      return;
+    }
     const body = (cat.notice && cat.notice.version === cat.version && cat.notice.text) ||
       (fresh.length ? `اتضاف: ${fresh.slice(0, 3).map((f) => f.title).join('، ')}` : 'المدرس حدّث محتوى المكتبة');
     reg.showNotification('مشروع التخرج — تحديث جديد', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl', renotify: true });
   } catch (e) {}
 }
-function showUpdateModal(cat, fresh) {
+function showUpdateModal(cat, fresh, news = [], changed = []) {
   updateOpen = true;
   const note = cat.notice && cat.notice.version === cat.version ? cat.notice.text : '';
   const bd = document.createElement('div');
   bd.className = 'backdrop center upd-modal';
   bd.innerHTML = `<div class="dialog upd" role="alertdialog" aria-modal="true" aria-labelledby="updT">
     <div class="upd-ic">${icon('bell', 30)}</div>
-    <h3 id="updT">تحديث جديد من المدرس</h3>
+    <h3 id="updT">${news.length && !fresh.length ? 'تعليمات جديدة من المدرس' : 'تحديث جديد من المدرس'}</h3>
+    ${news.length ? `<div class="upd-list">${news.slice(0, 3).map((n) => `<div class="upd-ann">${icon('megaphone', 16)}<span><b>${esc(n.title)}</b>${n.text ? `<small>${esc(n.text.slice(0, 140))}${n.text.length > 140 ? '…' : ''}</small>` : ''}</span></div>`).join('')}</div>` : ''}
     ${note ? `<div class="upd-note">${esc(note)}</div>` : ''}
-    ${fresh.length ? `<div class="upd-list">${fresh.slice(0, 5).map((f) => `<div>${icon('file', 16)}<span>${esc(f.title)}</span></div>`).join('')}${fresh.length > 5 ? `<small>و${ar(fresh.length - 5)} ملفات كمان</small>` : ''}</div>`
+    ${news.length && !fresh.length ? '' : fresh.length ? `<div class="upd-list">${fresh.slice(0, 5).map((f) => `<div>${icon('file', 16)}<span>${esc(f.title)}</span></div>`).join('')}${fresh.length > 5 ? `<small>و${ar(fresh.length - 5)} ملفات كمان</small>` : ''}</div>`
       : '<p>المدرس حدّث المكتبة — دوس تحديث عشان يوصلك آخر محتوى.</p>'}
     <div class="upd-prog hidden"><div class="progress"><i></i></div><small></small></div>
-    <button class="btn primary block" id="updGo">${icon('download', 18)} تحديث الآن</button>
+    <button class="btn primary block" id="updGo">${icon(news.length && !fresh.length ? 'megaphone' : 'download', 18)} ${news.length && !fresh.length ? 'اقرأ التعليمات' : 'تحديث الآن'}</button>
     <div class="hint" style="text-align:center;margin-top:8px">التحديث إجباري عشان يوصلك كل جديد</div>
   </div>`;
   document.body.appendChild(bd);
-  const go = bd.querySelector('#updGo');
-  go.onclick = async () => {
-    go.disabled = true; go.textContent = 'بيحدّث…';
+  const goBtn = bd.querySelector('#updGo');
+  goBtn.onclick = async () => {
+    goBtn.disabled = true; goBtn.textContent = 'بيحدّث…';
     const pr = bd.querySelector('.upd-prog'); pr.classList.remove('hidden');
     const bar = pr.querySelector('i'), lbl = pr.querySelector('small');
     let fail = 0;
-    for (const [i, f] of fresh.entries()) {
+    const todo = [...fresh, ...changed];
+    for (const [i, f] of todo.entries()) {
       try {
-        await getPdfBytes(f, (p) => { bar.style.width = Math.round(((i + p) / fresh.length) * 100) + '%'; lbl.textContent = `بيحمّل ${ar(i + 1)} من ${ar(fresh.length)}`; });
+        await getPdfBytes(f, (p) => { bar.style.width = Math.round(((i + p) / todo.length) * 100) + '%'; lbl.textContent = `بيحمّل ${ar(i + 1)} من ${ar(todo.length)}`; });
       } catch (e) { fail++; }
     }
     bar.style.width = '100%';
     setSeen(cat);
     updateOpen = false;
     bd.classList.add('closing'); setTimeout(() => bd.remove(), 220);
+    if (news.length) { go('/notices'); return; }
     toast(fail ? 'المكتبة اتحدّثت — في ملفات هتتحمّل لما تفتحها' : 'تمام! المكتبة محدّثة ومتاحة بدون نت');
     const r = currentRoute();
-    if (r === '/' || r === '/settings' || r === '/marks' || r === '/mynotes') onRoute();
+    if (r === '/' || r === '/settings' || r === '/marks' || r === '/mynotes' || r === '/notices') onRoute();
   };
 }
 function showAppUpdateModal(worker) {

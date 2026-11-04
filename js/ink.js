@@ -31,7 +31,7 @@ export function strokeOutline(s, W, live = false) {
   // finger: even, ink-like line · stylus: real pressure for natural thick/thin writing
   const finger = !s.pr;
   const opts = s.t === 'hi'
-    ? { size, thinning: 0, smoothing: 0.7, streamline: 0.55, simulatePressure: false, last: !live, start: { cap: true }, end: { cap: true } }
+    ? { size, thinning: 0, smoothing: 0.7, streamline: 0.55, simulatePressure: false, last: !live, start: { cap: false, taper: 0 }, end: { cap: false, taper: 0 } }
     : { size, thinning: finger ? 0.28 : 0.62, smoothing: 0.62, streamline: 0.4, simulatePressure: finger,
         easing: (t) => Math.sin((t * Math.PI) / 2), start: { cap: true, taper: 0 }, end: { cap: true, taper: 0 }, last: !live };
   return getStroke(pts, opts);

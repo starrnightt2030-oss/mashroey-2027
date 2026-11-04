@@ -115,6 +115,13 @@ function blobToB64(blob) {
     fr.readAsDataURL(blob);
   });
 }
+async function ghRaw(path) {
+  const r = await fetch(`https://api.github.com/repos/${session.repo}/contents/${path}?ref=${encodeURIComponent(session.branch)}`, {
+    cache: 'no-store', headers: { Accept: 'application/vnd.github.raw', Authorization: 'Bearer ' + session.token }
+  });
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+  return new Uint8Array(await r.arrayBuffer());
+}
 async function uploadBlob(blob) {
   const content = await blobToB64(blob);
   return (await gh(`/repos/${session.repo}/git/blobs`, { method: 'POST', body: JSON.stringify({ content, encoding: 'base64' }) })).sha;
@@ -313,7 +320,12 @@ export async function mountAdmin(view, { goBack }) {
         <input type="file" id="aFiles" accept="application/pdf,.pdf" multiple class="sr">
       </label>
       <div id="aPending"></div>
+      <div class="glabel">التعليمات للطلاب</div>
+      <div id="aNotices"></div>
       <div id="aPublished"></div>
+      <div class="group">
+        <button class="row" id="aRepair"><span class="ri">${icon('wand', 19)}</span><span class="rt"><b>تصليح نص الملفات المرفوعة</b><small id="aRepairSt">لو القراءة الصوتية بتطلع كلام غريب — بيصلّح النص المخفي من غير ما يغيّر شكل الملف</small></span></button>
+      </div>
       <div class="glabel">الإشعارات الفورية</div>
       <div class="group">
         <button class="row" id="aPush"><span class="ri">${icon('bell', 19)}</span><span class="rt"><b>إعداد OneSignal</b><small id="aPushSt">بيتأكد…</small></span><span class="chev">${icon('chev', 18)}</span></button>
@@ -333,6 +345,7 @@ export async function mountAdmin(view, { goBack }) {
     drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
     view.querySelector('#aReload').onclick = refresh;
     view.querySelector('#aPush').onclick = pushSetup;
+    view.querySelector('#aRepair').onclick = repairPublished;
     view.querySelector('#aPushManual').href = `https://github.com/${session.repo}/actions/workflows/notify-students.yml`;
     readPushCfg().then((c) => { const el = view.querySelector('#aPushSt'); if (el) el.textContent = c.onesignalAppId ? 'متفعّل ✓ — App ID متسجل' : 'مش متفعّل — دوس عشان تجهّزه'; });
     view.querySelector('#aPass').onclick = () => renderChangePass(false);
@@ -353,7 +366,7 @@ export async function mountAdmin(view, { goBack }) {
       state.index = await readIndex();
       if (dead) return;
       if (last) last.textContent = state.index.updated ? 'آخر مزامنة: ' + ago(state.index.updated) : 'لسه مفيش ملفات مرفوعة';
-      drawPublished();
+      drawPublished(); drawNotices();
     } catch (e) {
       if (last) last.textContent = ghError(e);
       if (e.status === 401) toast('مفتاح GitHub انتهى أو اتلغى — من «تغيير مفتاح GitHub» حط مفتاح جديد', { ms: 6000 });
@@ -378,6 +391,12 @@ export async function mountAdmin(view, { goBack }) {
         const buf = await file.arrayBuffer();
         const head = new TextDecoder().decode(new Uint8Array(buf.slice(0, 1024)));
         if (!head.includes('%PDF')) throw new Error('not pdf');
+        // repair the hidden Arabic text layer (read-aloud/search) — the page look is untouched
+        try {
+          const { repairArabicPdf } = await import('./arfix.js');
+          const r = await repairArabicPdf(buf);
+          if (r.fixed) { item.file = new File([r.bytes], file.name, { type: 'application/pdf' }); item.size = item.file.size; item.repaired = true; }
+        } catch (er) { console.warn('arfix', er); }
         const doc = await openPdf(buf);
         item.pages = doc.numPages;
         const page = await doc.getPage(1);
@@ -415,7 +434,7 @@ export async function mountAdmin(view, { goBack }) {
           <div class="pend-h">
             ${p.thumbUrl ? `<img src="${p.thumbUrl}" alt="" style="width:34px;height:44px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid var(--line)">` : '<span class="tagpdf">PDF</span>'}
             <span style="flex:1;font-size:13px;color:var(--muted);direction:ltr;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.file.name)}</span>
-            <span class="st ${p.status === 'error' ? 'err' : ''}">${p.status === 'checking' ? 'بيتفحص…' : p.status === 'error' ? esc(p.err) : `${ar(p.pages)} صفحة · ${mb(p.size)}`}</span>
+            <span class="st ${p.status === 'error' ? 'err' : ''}">${p.status === 'checking' ? 'بيتفحص…' : p.status === 'error' ? esc(p.err) : `${ar(p.pages)} صفحة · ${mb(p.size)}${p.repaired ? ' · اتصلّح النص ✓' : ''}`}</span>
             <button class="iconbtn" data-rm style="width:34px;height:34px" aria-label="شيل">${icon('x', 16)}</button>
           </div>
           ${p.status !== 'error' ? `
@@ -491,6 +510,96 @@ export async function mountAdmin(view, { goBack }) {
   }
 
   const isHidden = (f) => (f.id in state.vis ? state.vis[f.id] : !!f.hidden);
+
+  // ---------- instructions for students ----------
+  function drawNotices() {
+    const box = view.querySelector('#aNotices');
+    if (!box || !state.index) return;
+    const list = [...(state.index.announcements || [])].sort((a, b) => b.at - a.at);
+    box.innerHTML = `<div class="group">
+      <button class="row" id="aNewNotice"><span class="ri" style="background:var(--red-soft);color:var(--red)">${icon('megaphone', 19)}</span><span class="rt"><b>إرسال تعليمات جديدة</b><small>بتظهر لكل الطلاب فوراً + إشعار على الموبايل</small></span><span class="chev">${icon('plus', 18)}</span></button>
+      ${list.slice(0, 15).map((n) => `<div class="row"><span class="ri">${icon('megaphone', 17)}</span><span class="rt"><b>${esc(n.title)}</b><small>${esc(ago(n.at))}${n.text ? ' · ' + esc(n.text.slice(0, 60)) : ''}</small></span>
+        <button class="iconbtn" data-del-notice="${n.id}" aria-label="حذف">${icon('trash', 17)}</button></div>`).join('')}
+    </div>`;
+    box.querySelector('#aNewNotice').onclick = newNotice;
+    box.querySelectorAll('[data-del-notice]').forEach((b) => b.onclick = () => deleteNotice(b.dataset.delNotice));
+  }
+  function newNotice() {
+    sheet({
+      title: 'تعليمات جديدة للطلاب',
+      html: `<form class="stack">
+        <div class="field"><label for="nT">العنوان</label><input class="input" id="nT" required placeholder="مثلاً: امتحان الشهر يوم الأحد" autofocus></div>
+        <div class="field"><label for="nX">التفاصيل</label><textarea class="textarea" id="nX" placeholder="اكتب التعليمات بالتفصيل…"></textarea></div>
+        <button class="btn primary block" id="nSend">${icon('megaphone', 18)} نشر وإرسال لكل الطلاب</button>
+        <div class="hint" style="text-align:center">هتظهر في صفحة «التعليمات» وعلى الشاشة الرئيسية، ويوصل إشعار للموبايلات اللي مفعّلة الإشعارات</div>
+      </form>`,
+      onMount(el, api) {
+        el.querySelector('form').onsubmit = async (e) => {
+          e.preventDefault();
+          const title = el.querySelector('#nT').value.trim(), text = el.querySelector('#nX').value.trim();
+          if (!title) return toast('اكتب عنوان للتعليمات');
+          const b = el.querySelector('#nSend'); b.disabled = true; b.textContent = 'بينشر…';
+          try {
+            const { head, baseTree } = await headInfo();
+            const index = await readIndex(head);
+            index.version = (index.version || 0) + 1;
+            index.updated = Date.now();
+            (index.announcements ||= []).push({ id: newId(), title, text, at: Date.now(), version: index.version });
+            await commitTree(head, baseTree, [{ path: 'files/index.json', mode: '100644', type: 'blob', content: JSON.stringify(index, null, 1) }], 'تعليمات جديدة للطلاب: ' + title);
+            state.index = index; drawNotices();
+            api.close();
+            toast('اتنشرت التعليمات — هتوصل لكل الطلاب خلال دقيقة أو اتنين', { ms: 5000 });
+          } catch (err) { toast('محصلش نشر: ' + ghError(err)); b.disabled = false; b.innerHTML = icon('megaphone', 18) + ' نشر وإرسال لكل الطلاب'; }
+        };
+      }
+    });
+  }
+  async function deleteNotice(id) {
+    if (!(await confirmDlg('حذف التعليمات دي؟', 'هتختفي من عند كل الطلاب.', 'احذف', true))) return;
+    try {
+      const { head, baseTree } = await headInfo();
+      const index = await readIndex(head);
+      index.announcements = (index.announcements || []).filter((n) => n.id !== id);
+      await commitTree(head, baseTree, [{ path: 'files/index.json', mode: '100644', type: 'blob', content: JSON.stringify(index, null, 1) }], 'حذف تعليمات');
+      state.index = index; drawNotices(); toast('اتحذفت');
+    } catch (err) { toast('محصلش حذف: ' + ghError(err)); }
+  }
+
+  // ---------- repair the text layer of already-published PDFs ----------
+  async function repairPublished() {
+    const st = view.querySelector('#aRepairSt');
+    const btn = view.querySelector('#aRepair');
+    if (!state.index || !state.index.files.length) return toast('مفيش ملفات منشورة');
+    btn.disabled = true;
+    try {
+      const { repairArabicPdf } = await import('./arfix.js');
+      const fixedFiles = [];
+      for (const [i, f] of state.index.files.entries()) {
+        st.textContent = `بيفحص ${ar(i + 1)} من ${ar(state.index.files.length)}: ${f.title}`;
+        const bytes = await ghRaw(f.path);
+        const r = await repairArabicPdf(bytes);
+        if (r.fixed) fixedFiles.push({ f, bytes: r.bytes });
+      }
+      if (!fixedFiles.length) { st.textContent = 'كل الملفات سليمة — مفيش حاجة محتاجة تصليح ✓'; btn.disabled = false; return; }
+      st.textContent = `بيرفع ${ar(fixedFiles.length)} ملف بعد التصليح…`;
+      const { head, baseTree } = await headInfo();
+      const index = await readIndex(head);
+      const tree = [];
+      for (const { f, bytes } of fixedFiles) {
+        const sha = await uploadBlob(new Blob([bytes], { type: 'application/pdf' }));
+        tree.push({ path: f.path, mode: '100644', type: 'blob', sha });
+        const e = index.files.find((x) => x.id === f.id);
+        if (e) { e.rev = (e.rev || 0) + 1; e.size = bytes.length; }
+      }
+      index.version = (index.version || 0) + 1;
+      index.updated = Date.now();
+      tree.push({ path: 'files/index.json', mode: '100644', type: 'blob', content: JSON.stringify(index, null, 1) });
+      await commitTree(head, baseTree, tree, `تصليح نص ${fixedFiles.length} ملف للقراءة الصوتية`);
+      state.index = index; drawPublished();
+      st.textContent = `اتصلّح ${ar(fixedFiles.length)} ملف ✓ — الطلاب هيحمّلوا النسخة المصلّحة تلقائي`;
+    } catch (err) { st.textContent = 'محصلش تصليح: ' + ghError(err); }
+    btn.disabled = false;
+  }
 
   function drawPublished() {
     const box = view.querySelector('#aPublished');

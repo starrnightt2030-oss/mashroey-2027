@@ -37,8 +37,9 @@ export function invalidateDownloads() { downloadedSet = null; }
 // Returns the PDF bytes, from the device if saved, otherwise downloads and saves it.
 export async function getPdfBytes(file, onProgress) {
   const saved = await db.get('pdfs', file.id);
-  if (saved) return saved;
-  const res = await fetch(file.path, { cache: 'no-cache' });
+  const revs = (() => { try { return JSON.parse(localStorage.getItem('pdf-rev') || '{}'); } catch (e) { return {}; } })();
+  if (saved && (revs[file.id] || 0) === (file.rev || 0)) return saved;
+  const res = await fetch(file.path + (file.rev ? '?v=' + file.rev : ''), { cache: 'no-cache' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const total = +res.headers.get('content-length') || file.size || 0;
   let buf;
@@ -60,6 +61,7 @@ export async function getPdfBytes(file, onProgress) {
     buf = await res.arrayBuffer();
   }
   await db.set('pdfs', file.id, buf);
+  try { revs[file.id] = file.rev || 0; localStorage.setItem('pdf-rev', JSON.stringify(revs)); } catch (e) {}
   if (downloadedSet) downloadedSet.add(file.id);
   return buf;
 }

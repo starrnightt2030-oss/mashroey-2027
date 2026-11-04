@@ -37,7 +37,10 @@ jobs:
           BODY=$(jq -r --slurpfile old /tmp/old.json '
             ([$old[0].files[]?.id]) as $o
             | ([.files[] | select((.hidden | not) and ((.id) as $i | ($o | index($i)) == null)) | .title]) as $n
-            | if ((.notice.version // -1) == .version) and ((.notice.text // "") | length > 0) then .notice.text
+            | .version as $v
+            | ([(.announcements // [])[] | select(.version == $v)]) as $a
+            | if ($a | length) > 0 then "تعليمات جديدة: " + $a[0].title + (if (($a[0].text // "") | length) > 0 then " — " + ($a[0].text[:120]) else "" end)
+              elif ((.notice.version // -1) == .version) and ((.notice.text // "") | length > 0) then .notice.text
               elif ($n | length) > 0 then "اتضاف \($n | length) ملف جديد: " + ($n[:3] | join("، "))
               else "المدرس حدّث محتوى المكتبة — افتح التطبيق" end' files/index.json)
           { echo "skip=false"; echo "body<<EOF"; echo "$BODY"; echo "EOF"; } >> "$GITHUB_OUTPUT"

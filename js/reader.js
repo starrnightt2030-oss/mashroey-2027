@@ -329,6 +329,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     rafDraw = requestAnimationFrame(() => {
       rafDraw = 0;
       if (!live || !liveCtx) return;
+      if (live.t === 'hi' && live.p.length < 3) return; // marker: no round dot before it moves
       liveCtx.setTransform(1, 0, 0, 1, 0, 0);
       liveCtx.clearRect(0, 0, liveCv.width, liveCv.height);
       liveCtx.setTransform(liveQ, 0, 0, liveQ, 0, 0);
@@ -410,6 +411,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     if (!down || e.pointerId !== down.id) return;
     if (live && !cancel) {
       const s = live; live = null;
+      if (s.t === 'hi' && s.p.length < 3) { closeLive(); down = null; return; } // a tap with the marker draws nothing
       if (s.p.length === 1) s.p.push([s.p[0][0] + 0.0004, s.p[0][1] + 0.0004, s.p[0][2]]);
       if (s.t === 'hi') tidyHighlight(s);
       s.p = simplify(s.p);
@@ -422,6 +424,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
   }
   pagesEl.addEventListener('pointerup', (e) => endPtr(e, false));
   pagesEl.addEventListener('pointercancel', (e) => endPtr(e, true));
+  pagesEl.addEventListener('contextmenu', (e) => e.preventDefault()); // no long-press menu / selection circle
   function cancelLive() { if (live) { live = null; closeLive(); } down = null; }
 
   // ---------- two-finger pan / pinch ----------
@@ -658,6 +661,17 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     ttsPage = n;
     let text = '';
     try { text = await pageText(await st.pages[n]); } catch (e) {}
+    if (TTS.looksGarbled(text)) {
+      stopTts();
+      sheet({
+        title: 'النص اللي جوه الملف ده بايظ',
+        html: `<div class="stack"><p class="hint" style="font-size:14.5px;margin:0">الملف شكله سليم، بس الحروف المتخزنة جواه متلخبطة (مشكلة معروفة في ملفات Word القديمة)، فالقراءة الصوتية هتطلع كلام مش مفهوم.</p>
+          <p class="hint" style="font-size:14.5px;margin:0">الحل عند المدرس: من لوحة المدرس ← «تصليح نص الملفات المرفوعة» — وبعدها هتتقري صح.</p>
+          ${file.audio ? '<button class="btn primary block" data-a="audio">اسمع تسجيل المدرس بدل كده</button>' : ''}<button class="btn block" data-close>تمام</button></div>`,
+        onMount(el, api) { const b = el.querySelector('[data-a]'); if (b) b.onclick = () => { api.close(); startAudio(); }; }
+      });
+      return;
+    }
     const chunks = TTS.chunkText(text);
     if (!chunks.length) {
       emptyRun++;
@@ -677,7 +691,15 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     stopTts();
     if (!TTS.supported) { toast('المتصفح ده مش بيدعم القراءة الصوتية'); return; }
     const voices = await TTS.arabicVoices();
-    if (!voices.length) toast('مفيش صوت عربي متثبت على جهازك — من إعدادات الموبايل ← تحويل النص إلى كلام ← نزّل اللغة العربية', { ms: 7000 });
+    if (!voices.length) {
+      sheet({
+        title: 'مفيش صوت عربي على الموبايل ده',
+        html: `<div class="stack"><p class="hint" style="font-size:14.5px;margin:0">عشان القراءة تطلع عربي سليم لازم صوت عربي يكون متثبت:</p>
+          <p style="margin:0;line-height:2">١. نزّل تطبيق <b>Speech Services by Google</b> من Play Store (أو حدّثه).<br>٢. إعدادات الموبايل ← اللغة والإدخال ← <b>تحويل النص إلى كلام</b> ← اختار Google.<br>٣. من ⚙ جنبه ← <b>تثبيت بيانات الصوت</b> ← العربية.<br>٤. ارجع للتطبيق ومن الإعدادات اختار الصوت العربي.</p>
+          <button class="btn primary block" data-close>فهمت</button></div>`
+      });
+      return;
+    }
     spk = new TTS.Speaker({
       onCaption: (t, i, len) => {
         const c = $('ttsCap'), p = $('ttsProg');

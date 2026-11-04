@@ -69,7 +69,8 @@ export async function pageText(page) {
   }
   return outLines.join('\n')
     .normalize('NFKC')              // Arabic presentation forms → normal letters
-    .replace(/ـ/g, '')         // tatweel
+    .replace(/\u0640/g, '')         // tatweel
+    .replace(/[\u06BE\u06C1]/g, '\u0647').replace(/[\u06CC\u06D2]/g, '\u064A').replace(/\u06A9/g, '\u0643').replace(/\u06C0/g, '\u0629') // Persian look-alikes
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .trim();

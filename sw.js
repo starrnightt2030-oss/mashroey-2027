@@ -1,10 +1,10 @@
 // Service worker — makes the app installable and work offline.
-const VERSION = 'v1.2.1';
+const VERSION = 'v1.3.0';
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = 'runtime-v1';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/ui.js', 'js/db.js', 'js/catalog.js', 'js/reader.js', 'js/notes.js', 'js/ink.js', 'js/pdf.js', 'js/tts.js', 'js/export.js', 'js/admin.js',
+  'js/app.js', 'js/ui.js', 'js/db.js', 'js/catalog.js', 'js/reader.js', 'js/notes.js', 'js/ink.js', 'js/pdf.js', 'js/tts.js', 'js/export.js', 'js/admin.js', 'js/arfix.js',
   'vendor/pdfjs/pdf.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs', 'vendor/perfect-freehand.mjs',
   'vendor/fonts/ibm-plex-sans-arabic-arabic-400-normal.woff2', 'vendor/fonts/ibm-plex-sans-arabic-arabic-500-normal.woff2',
   'vendor/fonts/ibm-plex-sans-arabic-arabic-600-normal.woff2', 'vendor/fonts/ibm-plex-sans-arabic-arabic-700-normal.woff2',
@@ -77,8 +77,9 @@ async function checkUpdates() {
     const notR = await c.match('notified-version');
     const notified = notR ? +(await notR.text()) : 0;
     if (v > seen && v > notified) {
-      const body = (j.notice && j.notice.version === v && j.notice.text) || 'المدرس نزّل محتوى جديد — افتح التطبيق عشان يوصلك.';
-      await self.registration.showNotification('مشروع التخرج — تحديث جديد', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl' });
+      const ann = (j.announcements || []).filter((a) => a.version > seen).sort((a, b) => b.at - a.at)[0];
+      const body = ann ? ann.title + (ann.text ? ' — ' + ann.text.slice(0, 120) : '') : (j.notice && j.notice.version === v && j.notice.text) || 'المدرس نزّل محتوى جديد — افتح التطبيق عشان يوصلك.';
+      await self.registration.showNotification(ann ? 'مشروع التخرج — تعليمات جديدة' : 'مشروع التخرج — تحديث جديد', { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'content-update', lang: 'ar', dir: 'rtl' });
       await c.put('notified-version', new Response(String(v)));
       if (self.navigator.setAppBadge) self.navigator.setAppBadge(1).catch(() => {});
     }

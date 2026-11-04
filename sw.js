@@ -1,5 +1,5 @@
 // Service worker — makes the app installable and work offline.
-const VERSION = 'v1.3.0';
+const VERSION = 'v1.3.1';
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = 'runtime-v1';
 const ASSETS = [

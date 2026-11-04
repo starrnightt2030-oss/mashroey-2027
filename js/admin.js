@@ -307,7 +307,7 @@ export async function mountAdmin(view, { goBack }) {
       <div class="gh-card">
         <div class="gi">${icon('git', 22)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:15px"><span class="live"></span>متصل بـ GitHub</div>
+          <div style="font-weight:600;font-size:15px"><span class="gh-live"></span>متصل بـ GitHub</div>
           <small dir="ltr" style="text-align:right">${esc(session.repo)} · ${esc(session.branch)}</small>
           <small id="aLast">بيجيب البيانات…</small>
         </div>

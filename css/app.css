@@ -320,7 +320,7 @@ h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35}
 .gh-card{padding:16px;border-radius:20px;background:var(--hero);color:#fff;display:flex;align-items:center;gap:14px}
 .gh-card .gi{width:46px;height:46px;border-radius:14px;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .gh-card small{color:var(--hero-muted);font-size:12px;display:block}
-.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6EC8AA;margin-inline-end:6px}
+.gh-live{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6EC8AA;margin-inline-end:6px}
 .drop{border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));border-radius:22px;background:var(--surface);padding:24px 16px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;cursor:pointer;transition:background .2s}
 .drop.over{background:var(--accent-soft)}
 .drop .di{width:56px;height:56px;border-radius:18px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center}
@@ -354,8 +354,8 @@ h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35}
 .hero{border-top:3px solid var(--red)}
 .brand-name{letter-spacing:-.01em}
 .tab.on .ic{color:var(--accent)}
-.pg canvas.live{pointer-events:none;z-index:1;mix-blend-mode:multiply}
-.night .pg canvas.live{mix-blend-mode:normal}
+.pg canvas.ink-live{pointer-events:none;z-index:1;mix-blend-mode:multiply}
+.night .pg canvas.ink-live{mix-blend-mode:normal}
 
 /* ============ Update modal ============ */
 .upd-modal{z-index:95;background:rgba(8,14,32,.62);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}

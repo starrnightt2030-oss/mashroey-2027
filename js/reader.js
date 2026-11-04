@@ -316,7 +316,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     const el = st.els[n - 1];
     const ink = el.querySelector('canvas.ink');
     liveCv = document.createElement('canvas');
-    liveCv.className = 'live';
+    liveCv.className = 'ink-live';
     liveCv.width = ink.width; liveCv.height = ink.height;
     el.appendChild(liveCv);
     try { liveCtx = liveCv.getContext('2d', { desynchronized: true }); } catch (e) { liveCtx = null; }

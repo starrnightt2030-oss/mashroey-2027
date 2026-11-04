@@ -3,7 +3,7 @@ import { icon, esc, ar, mb, ago, toast, sheet, confirmDlg, go, closeAllOverlays,
 import { db, persist, STORES } from './db.js';
 import { loadCatalog, getCatalog, findFile, downloadedIds, getPdfBytes, invalidateDownloads } from './catalog.js';
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 const DEV = { name: 'Mohamed Eldawly', role: 'Designed & Developed by', product: 'Graduation Project' };
 
 const view = document.getElementById('view');

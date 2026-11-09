@@ -4,7 +4,7 @@
   "description": "مكتبتك الدراسية — اقرأ ملفاتك، علّم عليها، واكتب ملاحظاتك.",
   "lang": "ar",
   "dir": "rtl",
-  "id": "./?app=mashroey-v2",
+  "id": "./?app=mashroey-v3",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -101,8 +101,11 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
 
   // ---------- layout & rendering ----------
   function layout() {
+    // fit the page to the full screen width (portrait or landscape);
+    // only cap it on big desktop screens so pages don't get absurdly wide
     const cw = scroll.clientWidth;
-    st.baseW = Math.min(cw - 16, 880);
+    const desktop = window.matchMedia('(hover:hover) and (pointer:fine)').matches;
+    st.baseW = Math.max(200, Math.min(cw - 8, desktop ? 1100 : Infinity));
     st.W = Math.round(st.baseW * st.zoom);
     st.els.forEach((el, i) => {
       const s = st.sizes[i];
@@ -811,6 +814,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     scroll.scrollTop = st.tops[n - 1] + off * (st.W / oldW);
   }, 150);
   window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
 
   return function cleanup() {
     st.dead = true;
@@ -819,6 +823,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     saveAnnos.flush(); saveMeta.flush();
     io.disconnect();
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('orientationchange', onResize);
     document.removeEventListener('gesturestart', noGesture);
     try { st.doc && st.doc.destroy(); } catch (e) {}
   };

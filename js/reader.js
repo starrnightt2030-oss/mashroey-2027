@@ -45,6 +45,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
       <button id="zOut" aria-label="تصغير">${icon('minus', 18)}</button>
     </div>
     <div id="rdTts"></div>
+    <button class="rd-tgl" id="rdTgl" aria-label="إخفاء الأدوات"></button>
     <div class="rd-tools" id="rdTools" role="toolbar" aria-label="أدوات الكتابة">
       <button class="tool" data-tool="pen" aria-label="قلم">${icon('pen')}</button>
       <button class="tool" data-tool="hi" aria-label="قلم تحديد">${icon('hi')}</button>
@@ -63,6 +64,19 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
   const rd = $('rd'), scroll = $('rdScroll'), pagesEl = $('rdPages');
 
   $('rdBack').onclick = () => goBack('/');
+
+  // ---------- show / hide the tools bar ----------
+  const setToolsOff = (off) => {
+    rd.classList.toggle('tools-off', off);
+    const b = $('rdTgl');
+    b.innerHTML = off ? `${icon('pen', 18)}<span>الأدوات</span>` : icon('eyeoff', 18);
+    b.setAttribute('aria-label', off ? 'إظهار الأدوات' : 'إخفاء الأدوات');
+    try { localStorage.setItem('rd-tools-off', off ? '1' : ''); } catch (e) {}
+  };
+  let toolsOff = false;
+  try { toolsOff = localStorage.getItem('rd-tools-off') === '1'; } catch (e) {}
+  setToolsOff(toolsOff);
+  $('rdTgl').onclick = () => setToolsOff(!rd.classList.contains('tools-off'));
   $('rdNotes').onclick = () => go('/notes/' + file.id);
 
   // ---------- load ----------

@@ -400,3 +400,12 @@ h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35}
 .reader,.reader *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .reader input,.reader textarea{-webkit-user-select:text;user-select:text}
 .pg,.pg canvas{-webkit-tap-highlight-color:transparent;outline:none}
+
+/* show / hide the tools bar */
+.rd-tools,.rd-zoom,.rd-ind,.rd-tts{transition:transform .28s cubic-bezier(.2,.8,.2,1),bottom .28s cubic-bezier(.2,.8,.2,1),opacity .28s}
+.rd-tgl{position:absolute;z-index:5;right:12px;bottom:calc(var(--sb) + 100px);height:40px;min-width:40px;padding:0 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line);color:var(--ink);display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:var(--shadow-sm);font:inherit;font-size:13px;font-weight:600;transition:bottom .28s cubic-bezier(.2,.8,.2,1)}
+.reader.tools-off .rd-tools{transform:translate(-50%,calc(100% + var(--sb) + 30px));opacity:0;pointer-events:none}
+.reader.tools-off .rd-tgl{bottom:calc(var(--sb) + 16px)}
+.reader.tools-off .rd-zoom,.reader.tools-off .rd-ind{bottom:calc(var(--sb) + 68px)}
+.reader.tools-off .rd-tts{bottom:calc(var(--sb) + 68px)}
+.in-reader:has(.reader.tools-off) .toasts{bottom:calc(var(--sb) + 120px)}

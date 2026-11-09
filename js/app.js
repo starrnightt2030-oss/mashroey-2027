@@ -697,3 +697,16 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   if ('Notification' in window && Notification.permission === 'granted') registerPeriodic();
   setTimeout(hideSplash, 1500);
 })();
+
+// ---------------- screen rotation ----------------
+// Installed apps on Android keep the old "portrait only" setting until Chrome
+// refreshes it (can take days). Unlock rotation ourselves so the app turns
+// with the phone right away.
+function freeRotation() {
+  try {
+    const o = screen.orientation;
+    if (o && o.lock) o.lock('any').catch(() => { try { o.unlock(); } catch (e) {} });
+  } catch (e) {}
+}
+freeRotation();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) freeRotation(); });

@@ -409,3 +409,11 @@ h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35}
 .reader.tools-off .rd-zoom,.reader.tools-off .rd-ind{bottom:calc(var(--sb) + 68px)}
 .reader.tools-off .rd-tts{bottom:calc(var(--sb) + 68px)}
 .in-reader:has(.reader.tools-off) .toasts{bottom:calc(var(--sb) + 120px)}
+
+/* full screen: hide everything except the PDF and the tools button */
+.rd-exitfull{display:none;position:absolute;z-index:5;right:12px;bottom:calc(var(--sb) + 148px);height:40px;padding:0 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line);color:var(--ink);align-items:center;gap:6px;box-shadow:var(--shadow-sm);font:inherit;font-size:13px;font-weight:600}
+.reader.full .rd-top{display:none}
+.reader.full .rd-zoom,.reader.full .rd-ind{display:none}
+.reader.full:not(.tools-off) .rd-exitfull{display:flex}
+.reader.full .rd-pages{padding-top:max(4px,var(--st))}
+.reader.full .rd-tgl{opacity:.85}

@@ -31,6 +31,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
       <button class="iconbtn" id="rdBack" aria-label="رجوع">${icon('back')}</button>
       <div class="rd-title"><b>${esc(file.title)}</b><small id="rdSub">جارٍ الفتح…</small></div>
       <button class="iconbtn" id="rdNotes" aria-label="ملاحظات الملف">${icon('note', 21)}<span class="badge hidden" id="rdNotesN"></span></button>
+      <button class="iconbtn" id="rdFull" aria-label="ملء الشاشة">${icon('expand', 21)}</button>
       <button class="iconbtn" id="rdBm" aria-label="علامة مرجعية للصفحة دي">${icon('bookmark', 21)}</button>
       <button class="iconbtn" id="rdMore" aria-label="المزيد">${icon('more', 22)}</button>
     </header>
@@ -46,6 +47,7 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     </div>
     <div id="rdTts"></div>
     <button class="rd-tgl" id="rdTgl" aria-label="إخفاء الأدوات"></button>
+    <button class="rd-exitfull" id="rdExitFull" aria-label="الخروج من ملء الشاشة">${icon('shrink', 18)}<span>خروج</span></button>
     <div class="rd-tools" id="rdTools" role="toolbar" aria-label="أدوات الكتابة">
       <button class="tool" data-tool="pen" aria-label="قلم">${icon('pen')}</button>
       <button class="tool" data-tool="hi" aria-label="قلم تحديد">${icon('hi')}</button>
@@ -77,6 +79,28 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
   try { toolsOff = localStorage.getItem('rd-tools-off') === '1'; } catch (e) {}
   setToolsOff(toolsOff);
   $('rdTgl').onclick = () => setToolsOff(!rd.classList.contains('tools-off'));
+
+  // ---------- full screen: only the PDF + the tools button ----------
+  let toolsBeforeFull = false;
+  const setFull = (on) => {
+    if (rd.classList.contains('full') === on) return;
+    if (on) {
+      toolsBeforeFull = rd.classList.contains('tools-off');
+      rd.classList.add('full');
+      setToolsOff(true);
+      try { const d = document.documentElement; (d.requestFullscreen || d.webkitRequestFullscreen)?.call(d, { navigationUI: 'hide' })?.catch?.(() => {}); } catch (e) {}
+    } else {
+      rd.classList.remove('full');
+      setToolsOff(toolsBeforeFull);
+      try { if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {}); } catch (e) {}
+    }
+    window.dispatchEvent(new Event('resize'));
+  };
+  const onFsChange = () => { if (!document.fullscreenElement && !document.webkitFullscreenElement) setFull(false); };
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  $('rdFull').onclick = () => setFull(true);
+  $('rdExitFull').onclick = () => setFull(false);
   $('rdNotes').onclick = () => go('/notes/' + file.id);
 
   // ---------- load ----------
@@ -838,6 +862,9 @@ export async function mountReader(view, file, { page: startPage, goBack }) {
     io.disconnect();
     window.removeEventListener('resize', onResize);
     window.removeEventListener('orientationchange', onResize);
+    document.removeEventListener('fullscreenchange', onFsChange);
+    document.removeEventListener('webkitfullscreenchange', onFsChange);
+    try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
     document.removeEventListener('gesturestart', noGesture);
     try { st.doc && st.doc.destroy(); } catch (e) {}
   };
